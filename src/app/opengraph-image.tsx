@@ -145,14 +145,31 @@ export default async function Image() {
               fontWeight: "600",
               color: "rgba(255, 255, 255, 0.95)",
               textAlign: "center",
-              marginBottom: "56px",
+              marginBottom: "24px",
               lineHeight: 1.3,
               textShadow: "0 3px 12px rgba(0, 0, 0, 0.4)",
               maxWidth: "800px",
               fontFamily: "system-ui, -apple-system, sans-serif",
             }}
           >
-            {PROJECT_DESCRIPTION}
+            Track Your True Token Profits
+          </p>
+
+          {/* Subtitle */}
+          <p
+            style={{
+              fontSize: "28px",
+              fontWeight: "500",
+              color: "rgba(255, 255, 255, 0.8)",
+              textAlign: "center",
+              marginBottom: "56px",
+              lineHeight: 1.4,
+              textShadow: "0 2px 8px rgba(0, 0, 0, 0.3)",
+              maxWidth: "700px",
+              fontFamily: "system-ui, -apple-system, sans-serif",
+            }}
+          >
+            Calculate real PnL based on purchase price vs current value
           </p>
 
           {/* Farcaster branding element */}
