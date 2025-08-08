@@ -8,6 +8,7 @@ import { Label } from "~/components/ui/label";
 import { Badge } from "~/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Plus, TrendingUp, TrendingDown, DollarSign } from "lucide-react";
+import NotificationSettings from "~/components/NotificationSettings";
 
 interface Transaction {
   id: string;
@@ -42,6 +43,12 @@ interface DailyPnL {
   dailyChangePercentage: number;
 }
 
+interface NotificationSettings {
+  dailyPnLEnabled: boolean;
+  priceChangeEnabled: boolean;
+  priceChangeThreshold: number;
+}
+
 export default function PnLTracker() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [tokenPrices, setTokenPrices] = useState<TokenPrices>({});
@@ -57,9 +64,33 @@ export default function PnLTracker() {
     amount: "",
     pricePerToken: "",
   });
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>({
+    dailyPnLEnabled: false,
+    priceChangeEnabled: false,
+    priceChangeThreshold: 10,
+  });
+  const [lastNotifiedValues, setLastNotifiedValues] = useState({
+    portfolioValue: 0,
+    lastDailyPnLDate: "",
+  });
 
   // Popular tokens for quick price fetching
   const POPULAR_TOKENS = ["BTC", "ETH", "SOL", "USDC", "USDT", "BNB", "XRP", "ADA"];
+
+  // Send notification function
+  const sendNotification = (title: string, body: string) => {
+    if ("Notification" in window) {
+      if (Notification.permission === "granted") {
+        new Notification(title, { body, icon: "/icon.png" });
+      } else if (Notification.permission !== "denied") {
+        Notification.requestPermission().then((permission) => {
+          if (permission === "granted") {
+            new Notification(title, { body, icon: "/icon.png" });
+          }
+        });
+      }
+    }
+  };
 
   // Load data from localStorage on mount
   useEffect(() => {
@@ -77,6 +108,16 @@ export default function PnLTracker() {
     if (savedDailyHistory) {
       setDailyPnLHistory(JSON.parse(savedDailyHistory));
     }
+    
+    const savedNotificationSettings = localStorage.getItem("pnl-notification-settings");
+    if (savedNotificationSettings) {
+      setNotificationSettings(JSON.parse(savedNotificationSettings));
+    }
+    
+    const savedLastNotifiedValues = localStorage.getItem("pnl-last-notified-values");
+    if (savedLastNotifiedValues) {
+      setLastNotifiedValues(JSON.parse(savedLastNotifiedValues));
+    }
   }, []);
 
   // Save data to localStorage whenever they change
@@ -91,6 +132,14 @@ export default function PnLTracker() {
   useEffect(() => {
     localStorage.setItem("pnl-daily-history", JSON.stringify(dailyPnLHistory));
   }, [dailyPnLHistory]);
+  
+  useEffect(() => {
+    localStorage.setItem("pnl-notification-settings", JSON.stringify(notificationSettings));
+  }, [notificationSettings]);
+  
+  useEffect(() => {
+    localStorage.setItem("pnl-last-notified-values", JSON.stringify(lastNotifiedValues));
+  }, [lastNotifiedValues]);
 
   // Fetch token prices
   const fetchTokenPrices = async () => {
@@ -231,6 +280,48 @@ export default function PnLTracker() {
       setDailyPnLHistory(prev => [...prev, newEntry]);
     }
   }, [positions, startBalance]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle notifications
+  useEffect(() => {
+    const currentValue = getTotalPortfolioValue();
+    if (currentValue === 0) return;
+
+    const today = new Date().toDateString();
+    const todayEntry = dailyPnLHistory.find(entry => entry.date === today);
+
+    // Daily P&L notifications
+    if (notificationSettings.dailyPnLEnabled && todayEntry && lastNotifiedValues.lastDailyPnLDate !== today) {
+      const dailyChange = todayEntry.dailyChange;
+      const dailyChangePercentage = todayEntry.dailyChangePercentage;
+      
+      if (Math.abs(dailyChangePercentage) > 0.1) { // Only notify if change > 0.1%
+        const sign = dailyChange >= 0 ? '+' : '';
+        const title = dailyChange >= 0 ? 'Portfolio Gained Today' : 'Portfolio Lost Today';
+        const body = `${sign}${formatCurrency(dailyChange)} (${sign}${dailyChangePercentage.toFixed(2)}%)`;
+        
+        sendNotification(title, body);
+        setLastNotifiedValues(prev => ({ ...prev, lastDailyPnLDate: today }));
+      }
+    }
+
+    // Significant price change notifications
+    if (notificationSettings.priceChangeEnabled && lastNotifiedValues.portfolioValue > 0) {
+      const changePercentage = ((currentValue - lastNotifiedValues.portfolioValue) / lastNotifiedValues.portfolioValue) * 100;
+      
+      if (Math.abs(changePercentage) >= notificationSettings.priceChangeThreshold) {
+        const sign = changePercentage >= 0 ? '+' : '';
+        const title = changePercentage >= 0 ? 'Significant Portfolio Gain' : 'Significant Portfolio Drop';
+        const changeAmount = currentValue - lastNotifiedValues.portfolioValue;
+        const body = `${sign}${formatCurrency(changeAmount)} (${sign}${changePercentage.toFixed(2)}%) since last check`;
+        
+        sendNotification(title, body);
+        setLastNotifiedValues(prev => ({ ...prev, portfolioValue: currentValue }));
+      }
+    } else if (lastNotifiedValues.portfolioValue === 0) {
+      // Set initial portfolio value for future comparisons
+      setLastNotifiedValues(prev => ({ ...prev, portfolioValue: currentValue }));
+    }
+  }, [positions, dailyPnLHistory, notificationSettings, lastNotifiedValues]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setStartBalanceValue = () => {
     if (!startBalanceInput) return;
@@ -397,10 +488,11 @@ export default function PnLTracker() {
       </Card>
 
       <Tabs defaultValue="positions" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="positions">Positions</TabsTrigger>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
           <TabsTrigger value="daily">Daily P&L</TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
 
         <TabsContent value="positions" className="space-y-4">
@@ -542,6 +634,10 @@ export default function PnLTracker() {
                 </Card>
               ))
           )}
+        </TabsContent>
+
+        <TabsContent value="settings" className="space-y-4">
+          <NotificationSettings />
         </TabsContent>
       </Tabs>
 
