@@ -35,11 +35,22 @@ interface TokenPrices {
   [symbol: string]: number;
 }
 
+interface DailyPnL {
+  date: string;
+  portfolioValue: number;
+  dailyChange: number;
+  dailyChangePercentage: number;
+}
+
 export default function PnLTracker() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [tokenPrices, setTokenPrices] = useState<TokenPrices>({});
   const [positions, setPositions] = useState<TokenPosition[]>([]);
+  const [startBalance, setStartBalance] = useState<number>(0);
+  const [dailyPnLHistory, setDailyPnLHistory] = useState<DailyPnL[]>([]);
   const [isAddingTransaction, setIsAddingTransaction] = useState(false);
+  const [isSettingStartBalance, setIsSettingStartBalance] = useState(false);
+  const [startBalanceInput, setStartBalanceInput] = useState("");
   const [newTransaction, setNewTransaction] = useState({
     tokenSymbol: "",
     type: "buy" as "buy" | "sell",
@@ -50,18 +61,36 @@ export default function PnLTracker() {
   // Popular tokens for quick price fetching
   const POPULAR_TOKENS = ["BTC", "ETH", "SOL", "USDC", "USDT", "BNB", "XRP", "ADA"];
 
-  // Load transactions from localStorage on mount
+  // Load data from localStorage on mount
   useEffect(() => {
     const savedTransactions = localStorage.getItem("pnl-transactions");
     if (savedTransactions) {
       setTransactions(JSON.parse(savedTransactions));
     }
+    
+    const savedStartBalance = localStorage.getItem("pnl-start-balance");
+    if (savedStartBalance) {
+      setStartBalance(parseFloat(savedStartBalance));
+    }
+    
+    const savedDailyHistory = localStorage.getItem("pnl-daily-history");
+    if (savedDailyHistory) {
+      setDailyPnLHistory(JSON.parse(savedDailyHistory));
+    }
   }, []);
 
-  // Save transactions to localStorage whenever they change
+  // Save data to localStorage whenever they change
   useEffect(() => {
     localStorage.setItem("pnl-transactions", JSON.stringify(transactions));
   }, [transactions]);
+  
+  useEffect(() => {
+    localStorage.setItem("pnl-start-balance", startBalance.toString());
+  }, [startBalance]);
+  
+  useEffect(() => {
+    localStorage.setItem("pnl-daily-history", JSON.stringify(dailyPnLHistory));
+  }, [dailyPnLHistory]);
 
   // Fetch token prices
   const fetchTokenPrices = async () => {
@@ -165,7 +194,58 @@ export default function PnLTracker() {
     fetchTokenPrices();
     const interval = setInterval(fetchTokenPrices, 30000);
     return () => clearInterval(interval);
-  }, [transactions]);
+  }, [transactions]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Track daily PnL changes
+  useEffect(() => {
+    const currentValue = getTotalPortfolioValue();
+    if (currentValue === 0) return;
+
+    const today = new Date().toDateString();
+    const existingEntryIndex = dailyPnLHistory.findIndex(entry => entry.date === today);
+    
+    if (existingEntryIndex >= 0) {
+      // Update today's entry
+      const updatedHistory = [...dailyPnLHistory];
+      const previousValue = dailyPnLHistory[existingEntryIndex - 1]?.portfolioValue || startBalance;
+      updatedHistory[existingEntryIndex] = {
+        date: today,
+        portfolioValue: currentValue,
+        dailyChange: currentValue - previousValue,
+        dailyChangePercentage: previousValue > 0 ? ((currentValue - previousValue) / previousValue) * 100 : 0
+      };
+      setDailyPnLHistory(updatedHistory);
+    } else {
+      // Add new entry for today
+      const previousValue = dailyPnLHistory.length > 0 
+        ? dailyPnLHistory[dailyPnLHistory.length - 1].portfolioValue 
+        : startBalance;
+      
+      const newEntry: DailyPnL = {
+        date: today,
+        portfolioValue: currentValue,
+        dailyChange: currentValue - previousValue,
+        dailyChangePercentage: previousValue > 0 ? ((currentValue - previousValue) / previousValue) * 100 : 0
+      };
+      
+      setDailyPnLHistory(prev => [...prev, newEntry]);
+    }
+  }, [positions, startBalance]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setStartBalanceValue = () => {
+    if (!startBalanceInput) return;
+    
+    const value = parseFloat(startBalanceInput);
+    setStartBalance(value);
+    setStartBalanceInput("");
+    setIsSettingStartBalance(false);
+  };
+
+  const getTodaysPnL = () => {
+    const today = new Date().toDateString();
+    const todayEntry = dailyPnLHistory.find(entry => entry.date === today);
+    return todayEntry || null;
+  };
 
   const addTransaction = () => {
     if (!newTransaction.tokenSymbol || !newTransaction.amount || !newTransaction.pricePerToken) {
@@ -228,14 +308,51 @@ export default function PnLTracker() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="text-center">
-              <p className="text-sm text-muted-foreground">Total Value</p>
-              <p className="text-2xl font-bold">{formatCurrency(getTotalPortfolioValue())}</p>
+              <p className="text-sm text-muted-foreground">Start Balance</p>
+              <p className="text-lg font-bold">{formatCurrency(startBalance)}</p>
+              {!isSettingStartBalance ? (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="mt-1 text-xs"
+                  onClick={() => setIsSettingStartBalance(true)}
+                >
+                  {startBalance === 0 ? 'Set' : 'Edit'}
+                </Button>
+              ) : (
+                <div className="space-y-1 mt-1">
+                  <Input
+                    type="number"
+                    placeholder="1000.00"
+                    value={startBalanceInput}
+                    onChange={(e) => setStartBalanceInput(e.target.value)}
+                    className="text-xs h-6"
+                  />
+                  <div className="flex gap-1">
+                    <Button size="sm" className="text-xs h-5" onClick={setStartBalanceValue}>
+                      Save
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      className="text-xs h-5"
+                      onClick={() => {
+                        setIsSettingStartBalance(false);
+                        setStartBalanceInput("");
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="text-center">
-              <p className="text-sm text-muted-foreground">Total Invested</p>
-              <p className="text-2xl font-bold">{formatCurrency(getTotalInvested())}</p>
+              <p className="text-sm text-muted-foreground">Current Balance</p>
+              <p className="text-lg font-bold">{formatCurrency(getTotalPortfolioValue())}</p>
+              <p className="text-xs text-muted-foreground">Invested: {formatCurrency(getTotalInvested())}</p>
             </div>
             <div className="text-center">
               <p className="text-sm text-muted-foreground">Total P&L</p>
@@ -245,19 +362,45 @@ export default function PnLTracker() {
                 ) : (
                   <TrendingDown className="h-4 w-4 text-red-500" />
                 )}
-                <p className={`text-2xl font-bold ${getTotalPnL() >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                <p className={`text-lg font-bold ${getTotalPnL() >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                   {formatCurrency(getTotalPnL())}
                 </p>
               </div>
+              <p className={`text-xs ${getTotalPnL() >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {getTotalInvested() > 0 ? formatPercentage((getTotalPnL() / getTotalInvested()) * 100) : '+0.00%'}
+              </p>
+            </div>
+            <div className="text-center">
+              <p className="text-sm text-muted-foreground">Daily P&L</p>
+              {getTodaysPnL() ? (
+                <div>
+                  <div className="flex items-center justify-center gap-1">
+                    {getTodaysPnL()!.dailyChange >= 0 ? (
+                      <TrendingUp className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <TrendingDown className="h-4 w-4 text-red-500" />
+                    )}
+                    <p className={`text-lg font-bold ${getTodaysPnL()!.dailyChange >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                      {formatCurrency(getTodaysPnL()!.dailyChange)}
+                    </p>
+                  </div>
+                  <p className={`text-xs ${getTodaysPnL()!.dailyChange >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    {formatPercentage(getTodaysPnL()!.dailyChangePercentage)}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-lg font-bold text-muted-foreground">No data</p>
+              )}
             </div>
           </div>
         </CardContent>
       </Card>
 
       <Tabs defaultValue="positions" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="positions">Positions</TabsTrigger>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
+          <TabsTrigger value="daily">Daily P&L</TabsTrigger>
         </TabsList>
 
         <TabsContent value="positions" className="space-y-4">
@@ -342,6 +485,57 @@ export default function PnLTracker() {
                       </div>
                       <div className="text-right">
                         <p className="font-semibold">{formatCurrency(transaction.totalValue)}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+          )}
+        </TabsContent>
+
+        <TabsContent value="daily" className="space-y-4">
+          {dailyPnLHistory.length === 0 ? (
+            <Card>
+              <CardContent className="py-8">
+                <div className="text-center space-y-2">
+                  <p className="text-muted-foreground">No daily data yet</p>
+                  <p className="text-sm text-muted-foreground">Daily P&L will be tracked as you add transactions and prices update</p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            dailyPnLHistory
+              .slice()
+              .reverse()
+              .slice(0, 30) // Show last 30 days
+              .map(dailyData => (
+                <Card key={dailyData.date}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <h3 className="font-semibold">{new Date(dailyData.date).toLocaleDateString('en-US', { 
+                          weekday: 'short', 
+                          month: 'short', 
+                          day: 'numeric' 
+                        })}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          Portfolio Value: {formatCurrency(dailyData.portfolioValue)}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <div className="flex items-center gap-1 justify-end">
+                          {dailyData.dailyChange >= 0 ? (
+                            <TrendingUp className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <TrendingDown className="h-4 w-4 text-red-500" />
+                          )}
+                          <span className={`font-semibold ${dailyData.dailyChange >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                            {formatCurrency(dailyData.dailyChange)}
+                          </span>
+                        </div>
+                        <p className={`text-sm ${dailyData.dailyChange >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                          {formatPercentage(dailyData.dailyChangePercentage)}
+                        </p>
                       </div>
                     </div>
                   </CardContent>
