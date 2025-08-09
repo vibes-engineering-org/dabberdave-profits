@@ -7,9 +7,10 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Badge } from "~/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import { Plus, TrendingUp, TrendingDown, DollarSign, RefreshCw, Download } from "lucide-react";
+import { Plus, TrendingUp, TrendingDown, DollarSign, RefreshCw, Download, FileText } from "lucide-react";
 import NotificationSettings from "~/components/NotificationSettings";
 import ExchangeConnector from "~/components/ExchangeConnector";
+import ManualExchangeInput from "~/components/ManualExchangeInput";
 import { ExchangeService } from "~/lib/exchange-api";
 import { useToast } from "~/hooks/use-toast";
 
@@ -61,6 +62,7 @@ export default function PnLTracker() {
   const [isAddingTransaction, setIsAddingTransaction] = useState(false);
   const [isSettingStartBalance, setIsSettingStartBalance] = useState(false);
   const [startBalanceInput, setStartBalanceInput] = useState("");
+  const [activeTab, setActiveTab] = useState("positions");
   const [newTransaction, setNewTransaction] = useState({
     tokenSymbol: "",
     type: "buy" as "buy" | "sell",
@@ -601,12 +603,13 @@ export default function PnLTracker() {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="positions" className="w-full">
-        <TabsList className="grid w-full grid-cols-5">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="positions">Positions</TabsTrigger>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
           <TabsTrigger value="daily">Daily P&L</TabsTrigger>
           <TabsTrigger value="exchanges">Exchanges</TabsTrigger>
+          <TabsTrigger value="manual">Manual Input</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
 
@@ -754,6 +757,27 @@ export default function PnLTracker() {
         <TabsContent value="exchanges" className="space-y-4">
           <ExchangeConnector onConnectionChange={handleExchangeConnectionChange} />
           
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <h4 className="font-medium">Prefer Manual Input?</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Track your holdings and trades manually without API connections
+                  </p>
+                </div>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setActiveTab("manual")}
+                  className="flex items-center gap-2"
+                >
+                  <FileText className="h-4 w-4" />
+                  Manual Input
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+          
           {connectedExchanges.some(conn => conn.connected) && (
             <Card>
               <CardHeader>
@@ -809,6 +833,10 @@ export default function PnLTracker() {
               </CardContent>
             </Card>
           )}
+        </TabsContent>
+
+        <TabsContent value="manual" className="space-y-4">
+          <ManualExchangeInput />
         </TabsContent>
 
         <TabsContent value="settings" className="space-y-4">
