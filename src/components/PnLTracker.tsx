@@ -7,8 +7,11 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Badge } from "~/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import { Plus, TrendingUp, TrendingDown, DollarSign } from "lucide-react";
+import { Plus, TrendingUp, TrendingDown, DollarSign, RefreshCw, Download } from "lucide-react";
 import NotificationSettings from "~/components/NotificationSettings";
+import ExchangeConnector from "~/components/ExchangeConnector";
+import { ExchangeService } from "~/lib/exchange-api";
+import { useToast } from "~/hooks/use-toast";
 
 interface Transaction {
   id: string;
@@ -73,6 +76,10 @@ export default function PnLTracker() {
     portfolioValue: 0,
     lastDailyPnLDate: "",
   });
+  const [connectedExchanges, setConnectedExchanges] = useState<any[]>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const { toast } = useToast();
 
   // Popular tokens for quick price fetching
   const POPULAR_TOKENS = ["BTC", "ETH", "SOL", "USDC", "USDT", "BNB", "XRP", "ADA"];
@@ -117,6 +124,11 @@ export default function PnLTracker() {
     const savedLastNotifiedValues = localStorage.getItem("pnl-last-notified-values");
     if (savedLastNotifiedValues) {
       setLastNotifiedValues(JSON.parse(savedLastNotifiedValues));
+    }
+    
+    const savedLastSyncTime = localStorage.getItem("pnl-last-sync-time");
+    if (savedLastSyncTime) {
+      setLastSyncTime(savedLastSyncTime);
     }
   }, []);
 
@@ -388,14 +400,116 @@ export default function PnLTracker() {
     return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
   };
 
+  // Handle exchange connection changes
+  const handleExchangeConnectionChange = (connections: any[]) => {
+    setConnectedExchanges(connections);
+    
+    // Auto-sync when new exchanges are connected
+    const hasConnected = connections.some(conn => conn.connected);
+    if (hasConnected && !isSyncing) {
+      setTimeout(() => syncExchangeData(), 1000);
+    }
+  };
+
+  // Sync data from connected exchanges
+  const syncExchangeData = async () => {
+    if (connectedExchanges.length === 0) {
+      toast({
+        title: "No Connected Exchanges",
+        description: "Please connect at least one exchange to sync data",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      const exchangeService = ExchangeService.getInstance();
+      const exchangeData = await exchangeService.syncAllConnectedExchanges();
+      
+      if (Object.keys(exchangeData).length === 0) {
+        toast({
+          title: "Sync Complete",
+          description: "No new data found from connected exchanges",
+        });
+        return;
+      }
+
+      // Convert exchange data to transactions
+      const exchangeTransactions = exchangeService.convertToPnLTransactions(exchangeData);
+      
+      // Merge with existing transactions (avoid duplicates)
+      const existingIds = new Set(transactions.map(t => t.id));
+      const newTransactions = exchangeTransactions.filter(t => !existingIds.has(t.id));
+      
+      if (newTransactions.length > 0) {
+        setTransactions(prev => [...prev, ...newTransactions]);
+        
+        toast({
+          title: "Sync Successful",
+          description: `Imported ${newTransactions.length} new transactions from your exchanges`,
+        });
+      } else {
+        toast({
+          title: "Sync Complete",
+          description: "All transactions are already up to date",
+        });
+      }
+      
+      const now = new Date().toISOString();
+      setLastSyncTime(now);
+      localStorage.setItem("pnl-last-sync-time", now);
+      
+    } catch (error) {
+      console.error('Exchange sync failed:', error);
+      toast({
+        title: "Sync Failed",
+        description: error instanceof Error ? error.message : "Failed to sync exchange data",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Auto-sync every 5 minutes if exchanges are connected
+  useEffect(() => {
+    if (connectedExchanges.some(conn => conn.connected)) {
+      const interval = setInterval(() => {
+        syncExchangeData();
+      }, 5 * 60 * 1000); // 5 minutes
+      
+      return () => clearInterval(interval);
+    }
+  }, [connectedExchanges]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
       {/* Portfolio Overview */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <DollarSign className="h-5 w-5" />
-            Portfolio Overview
+          <CardTitle className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5" />
+              Portfolio Overview
+            </div>
+            <div className="flex items-center gap-2">
+              {lastSyncTime && (
+                <div className="text-xs text-muted-foreground">
+                  Last sync: {new Date(lastSyncTime).toLocaleTimeString()}
+                </div>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={syncExchangeData}
+                disabled={isSyncing || connectedExchanges.filter(c => c.connected).length === 0}
+                className="flex items-center gap-1"
+              >
+                <RefreshCw className={`h-3 w-3 ${isSyncing ? 'animate-spin' : ''}`} />
+                {isSyncing ? 'Syncing...' : 'Sync'}
+              </Button>
+            </div>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -488,10 +602,11 @@ export default function PnLTracker() {
       </Card>
 
       <Tabs defaultValue="positions" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="positions">Positions</TabsTrigger>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
           <TabsTrigger value="daily">Daily P&L</TabsTrigger>
+          <TabsTrigger value="exchanges">Exchanges</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
 
@@ -633,6 +748,66 @@ export default function PnLTracker() {
                   </CardContent>
                 </Card>
               ))
+          )}
+        </TabsContent>
+
+        <TabsContent value="exchanges" className="space-y-4">
+          <ExchangeConnector onConnectionChange={handleExchangeConnectionChange} />
+          
+          {connectedExchanges.some(conn => conn.connected) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Download className="h-5 w-5" />
+                  Exchange Data
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">Connected Exchanges</p>
+                      <p className="text-sm text-muted-foreground">
+                        {connectedExchanges.filter(c => c.connected).length} exchange(s) connected
+                      </p>
+                    </div>
+                    <Button onClick={syncExchangeData} disabled={isSyncing}>
+                      <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
+                      {isSyncing ? 'Syncing...' : 'Sync Now'}
+                    </Button>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {connectedExchanges
+                      .filter(conn => conn.connected)
+                      .map(conn => (
+                        <div key={conn.id} className="p-3 border rounded-md">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="font-medium">{conn.name}</h4>
+                            <Badge variant="default" className="bg-green-100 text-green-800">
+                              Connected
+                            </Badge>
+                          </div>
+                          {conn.lastSync && (
+                            <p className="text-sm text-muted-foreground">
+                              Last synced: {new Date(conn.lastSync).toLocaleString()}
+                            </p>
+                          )}
+                        </div>
+                      ))
+                    }
+                  </div>
+                  
+                  {lastSyncTime && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                      <p className="text-sm text-blue-800">
+                        <strong>Auto-sync enabled:</strong> Your exchange data will be automatically synced every 5 minutes while connected.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
           )}
         </TabsContent>
 
