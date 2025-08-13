@@ -1,7 +1,10 @@
 "use client";
 
 import { PROJECT_TITLE } from "~/lib/constants";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import PnLTracker from "~/components/PnLTracker";
+import WalletConnection from "~/components/WalletConnection";
+import WalletPnLDisplay from "~/components/WalletPnLDisplay";
 
 export default function App() {
   return (
@@ -17,7 +20,22 @@ export default function App() {
               Track your true P&L across all crypto investments
             </p>
           </div>
-          <PnLTracker />
+
+          <Tabs defaultValue="manual" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="manual">Manual Tracking</TabsTrigger>
+              <TabsTrigger value="wallet">Wallet Tracking</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="manual" className="space-y-6">
+              <PnLTracker />
+            </TabsContent>
+
+            <TabsContent value="wallet" className="space-y-6">
+              <WalletConnection />
+              <WalletPnLDisplay />
+            </TabsContent>
+          </Tabs>
         </div>
         {/* TEMPLATE_CONTENT_END */}
       </div>
